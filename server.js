@@ -8,7 +8,6 @@ const path = require("path");
 const nodemailer = require("nodemailer");
 const winston = require("winston");
 
-
 const logger = winston.createLogger({
     level: "info",
     format: winston.format.combine(
@@ -33,7 +32,8 @@ const client = new Client({
     authStrategy: new LocalAuth({ dataPath: path.join(__dirname, "sessions") }),
     puppeteer: {
         headless: true,
-        args: ["--no-sandbox", "--disable-setuid-sandbox"],
+        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+        timeout: 30000,
     },
 });
 
@@ -45,6 +45,8 @@ const transporter = nodemailer.createTransport({
     },
 });
 
+let isReconnecting = false;
+
 client.on("qr", async (qr) => {
     logger.info("QR code generated");
     console.log("Scan this QR code to log in:");
@@ -53,8 +55,8 @@ client.on("qr", async (qr) => {
     await qrcode.toFile(qrPath, qr);
 
     transporter.sendMail({
-        from: "amannick2@gmail.com",
-        to: "amannick2@gmail.com",
+        from: process.env.EMAIL_HOST_USER,
+        to: process.env.EMAIL_HOST_USER,
         subject: "New WhatsApp QR Code",
         text: "Scan the attached QR code to log in.",
         attachments: [{ filename: "qrcode.png", path: qrPath }],
@@ -74,7 +76,15 @@ client.on("ready", () => {
 client.on("disconnected", (reason) => {
     logger.warn("Client disconnected:", reason);
     console.log("Client disconnected:", reason);
-    client.initialize().catch((err) => logger.error("Reconnection failed:", err));
+    if (!isReconnecting) {
+        isReconnecting = true;
+        setTimeout(() => {
+            client.initialize().catch((err) => {
+                logger.error("Reconnection failed:", err);
+                isReconnecting = false;
+            });
+        }, 5000);
+    }
 });
 
 client.on("auth_failure", (msg) => {
